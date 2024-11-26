@@ -8,6 +8,13 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_community.llms import Ollama
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+@st.cache_resource
+def load_vectorstore():
+    vector_file = 'vectorstore/vectorstore.pkl'
+    with open(vector_file, "rb") as f:
+        return pickle.load(f)
+
 def get_source_from_doc(doc):
     pp = str(doc.metadata['page']+1)
     source = str(doc.metadata['source'])
@@ -22,16 +29,9 @@ def format_docs(docs):
         content = doc.page_content
         text += '\n\nSource: ' + source + '\n'+ content.strip() + '\n ----------'
     return text
-def generate_response(query, rag_chain):
-    response = ""
-    for chunk in rag_chain.stream(query):
-        print(chunk, end="", flush=True)
-        response += chunk
-    return response
+
 # Load vectorstore object from a file and convert it into a retriever
-vector_file = 'vectorstore/vectorstore.pkl'
-with open(vector_file, "rb") as f:
-    vectorstore = pickle.load(f)
+vectorstore = load_vectorstore()
 print("Vector store is loaded.")
 retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 
@@ -45,6 +45,7 @@ QUESTION: \n
 '''
 prompt = ChatPromptTemplate.from_template(template)
 
+#  Streamlit app layout
 with st.sidebar:
     openai_api_key = st.text_input(
         "OpenAI API Key", key="langchain_search_api_key_openai", type="password"
@@ -53,17 +54,18 @@ with st.sidebar:
     "[View the source code](https://github.com/streamlit/llm-examples/blob/main/pages/2_Chat_with_search.py)"
     "[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/streamlit/llm-examples?quickstart=1)"
 
-st.title("🔎 LangChain - Chat with search")
+st.title("MARIA1.0")
 
 """
-In this example, we're using `StreamlitCallbackHandler` to display the thoughts and actions of an agent in an interactive Streamlit app.
-Try more LangChain 🤝 Streamlit Agent examples at [github.com/langchain-ai/streamlit-agent](https://github.com/langchain-ai/streamlit-agent).
+**M**eter **A**nalysis and **R**etrieval **I**nformation **A**ssistant: **MARIA** version 1.0
+
+Developed by Piyapart Buttamart.
 """
 
 if "messages" not in st.session_state:
     # Display in the first chat UI
     st.session_state["messages"] = [
-        {"role": "assistant", "content": "Hi, I'm a chatbot who can search the web. How can I help you?"}
+        {"role": "assistant", "content": "Hi, I'm a chatbot who can retrieve and acquire data from PDFs. How can I assit you today?"}
     ]
 
 for msg in st.session_state.messages:
@@ -71,16 +73,11 @@ for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
     # role = "user" or "assistant"
 
-if query := st.chat_input(placeholder="Who won the Women's U.S. Open in 2018?"):
+if query := st.chat_input(placeholder="Ask anything about meter"):
     # User input handling
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state.messages.append({"role": "user", "content": query})
     st.chat_message("user").write(query)
 
-    # if not openai_api_key:
-    #     st.info("Please add your OpenAI API key to continue.")
-    #     st.stop()
-
-    # llm = ChatOpenAI(model_name="gpt-3.5-turbo", openai_api_key=openai_api_key, streaming=True)
     llm = Ollama(
     model="llama3.2",
     temperature=0.7,   # Adjusts randomness
@@ -90,17 +87,23 @@ if query := st.chat_input(placeholder="Who won the Women's U.S. Open in 2018?"):
     cache=True
     )
     
-
     rag_chain = (
         {"context": retriever | format_docs, "question": RunnablePassthrough()} # input: query, output: context (a formatted string of retrieved doc content) and question (the  query)
         | prompt # input: context and question, output: filled prompt
         | llm # input: filled prompt, output: string
         | StrOutputParser() # input: string, output: processed readable response
     )
-    # Processing user input wit hthe agent
-    with st.chat_message("assistant"):
-        # st_cb = StreamlitCallbackHandler(st.container(), expand_new_thoughts=False)
-        # response = search_agent.run(st.session_state.messages, callbacks=[st_cb])
-        response = generate_response(query, rag_chain)
-        st.session_state.messages.append({"role": "assistant", "content": response})
-        st.write(response)
+
+    response_stream = rag_chain.stream(query)
+
+    assistant_message = st.chat_message(name="assistant")
+
+    # Stream the response directly using write_stream()
+    response_text = assistant_message.write_stream(response_stream)
+    
+    # Append the full response to session state after streaming is complete to the UI
+    st.session_state.messages.append({"role": "assistant", "content": response_text})
+    
+    print("Response END")
+
+# Example question: Explain the purposes of signal converter, signal processor, and microprocessor
